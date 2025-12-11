@@ -11,12 +11,14 @@ import os
 import random
 import shutil
 from pathlib import Path
+from PIL import Image
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget,
                               QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                               QLineEdit, QTextEdit, QGroupBox, QSpinBox,
                               QDoubleSpinBox, QComboBox, QCheckBox, QListWidget,
                               QTableWidget, QSplitter, QFileDialog, QSlider,
-                              QProgressBar, QRadioButton, QGridLayout, QListWidgetItem)
+                              QProgressBar, QRadioButton, QGridLayout, QListWidgetItem,
+                              QMessageBox)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
 
@@ -324,9 +326,146 @@ class SamplingTab(QWidget):
             self.log_text.append("Error: Please select an input folder first")
             return
 
+        if not os.path.exists(input_path):
+            self.log_text.append("Error: Input folder does not exist")
+            return
+
+        self.log_text.append("=" * 50)
         self.log_text.append(f"Analyzing dataset at: {input_path}")
-        # TODO: Implement dataset analysis
-        self.log_text.append("Analysis complete (not yet implemented)")
+        QApplication.processEvents()
+
+        try:
+            # Get all video folders
+            video_folders = [f for f in os.listdir(input_path)
+                           if os.path.isdir(os.path.join(input_path, f))]
+
+            if not video_folders:
+                self.log_text.append("Error: No subfolders found")
+                return
+
+            # Initialize statistics
+            total_images = 0
+            total_labels = 0
+            folder_image_counts = []
+            resolutions = {}
+            file_sizes = []
+            annotation_counts = []
+            all_classes = set()
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+
+            # Analyze each video folder
+            for folder_name in video_folders:
+                video_folder_path = os.path.join(input_path, folder_name)
+                frames_folder = os.path.join(video_folder_path, 'frames')
+                labels_folder = os.path.join(video_folder_path, 'labels')
+
+                # Check if folders exist
+                if not os.path.exists(frames_folder) or not os.path.exists(labels_folder):
+                    continue
+
+                # Count images in this folder
+                folder_images = 0
+
+                # Analyze frames folder
+                for image_file in os.listdir(frames_folder):
+                    if Path(image_file).suffix.lower() in image_extensions:
+                        folder_images += 1
+                        total_images += 1
+                        image_path = os.path.join(frames_folder, image_file)
+
+                        # Get file size
+                        file_size = os.path.getsize(image_path)
+                        file_sizes.append(file_size)
+
+                        # Get image resolution (only sample some to save time)
+                        if total_images % 10 == 0 or total_images <= 10:
+                            try:
+                                with Image.open(image_path) as img:
+                                    resolution = f"{img.width}x{img.height}"
+                                    resolutions[resolution] = resolutions.get(resolution, 0) + 1
+                            except Exception:
+                                pass  # Skip if image can't be opened
+
+                folder_image_counts.append(folder_images)
+
+                # Analyze labels folder
+                for label_file in os.listdir(labels_folder):
+                    if label_file.endswith('.txt'):
+                        total_labels += 1
+                        label_path = os.path.join(labels_folder, label_file)
+
+                        # Count annotations and classes in this label file
+                        try:
+                            with open(label_path, 'r') as f:
+                                lines = f.readlines()
+                                annotation_counts.append(len(lines))
+
+                                # Extract class IDs (first number in each line)
+                                for line in lines:
+                                    parts = line.strip().split()
+                                    if parts:
+                                        all_classes.add(int(parts[0]))
+                        except Exception:
+                            pass  # Skip if file can't be read
+
+            # Calculate statistics
+            num_folders = len([c for c in folder_image_counts if c > 0])
+            min_images = min(folder_image_counts) if folder_image_counts else 0
+            max_images = max(folder_image_counts) if folder_image_counts else 0
+            avg_images = sum(folder_image_counts) / len(folder_image_counts) if folder_image_counts else 0
+
+            min_file_size = min(file_sizes) if file_sizes else 0
+            max_file_size = max(file_sizes) if file_sizes else 0
+
+            min_annotations = min(annotation_counts) if annotation_counts else 0
+            max_annotations = max(annotation_counts) if annotation_counts else 0
+
+            num_classes = len(all_classes)
+
+            # Update UI labels
+            self.vf_total_images_label.setText(str(total_images))
+            self.vf_total_labels_label.setText(str(total_labels))
+            self.vf_video_folders_label.setText(str(num_folders))
+            self.vf_images_per_folder_label.setText(f"Min: {min_images}, Max: {max_images}, Avg: {avg_images:.1f}")
+
+            # Format resolutions
+            if resolutions:
+                # Get top 5 most common resolutions
+                sorted_res = sorted(resolutions.items(), key=lambda x: x[1], reverse=True)[:5]
+                res_text = ", ".join([f"{res} ({count})" for res, count in sorted_res])
+                self.vf_resolutions_label.setText(res_text)
+            else:
+                self.vf_resolutions_label.setText("N/A")
+
+            # Format file sizes
+            min_size_str = self.format_file_size(min_file_size)
+            max_size_str = self.format_file_size(max_file_size)
+            self.vf_file_size_label.setText(f"Min: {min_size_str}, Max: {max_size_str}")
+
+            self.vf_annotations_label.setText(f"Min: {min_annotations}, Max: {max_annotations}")
+            self.vf_classes_label.setText(str(num_classes))
+
+            # Log results
+            self.log_text.append(f"✓ Analysis complete!")
+            self.log_text.append(f"  Total images: {total_images}")
+            self.log_text.append(f"  Total labels: {total_labels}")
+            self.log_text.append(f"  Video folders: {num_folders}")
+            self.log_text.append(f"  Classes found: {num_classes}")
+            self.log_text.append("=" * 50)
+
+        except Exception as e:
+            self.log_text.append(f"Error during analysis: {str(e)}")
+            import traceback
+            self.log_text.append(traceback.format_exc())
+
+    def format_file_size(self, size_bytes):
+        """Format file size in human-readable format"""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        else:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
 
     def select_all_folders(self):
         """Select all video folders"""
@@ -496,14 +635,53 @@ class SamplingTab(QWidget):
             self.log_text.append(f"Sampled {len(sampled_pairs)} pairs")
 
             # Step 3: Create output folders
-            self.log_text.append("Step 3: Creating output folders...")
+            self.log_text.append("Step 3: Preparing output folders...")
             output_images_folder = os.path.join(output_path, 'images')
             output_labels_folder = os.path.join(output_path, 'labels')
 
             os.makedirs(output_images_folder, exist_ok=True)
             os.makedirs(output_labels_folder, exist_ok=True)
-            self.log_text.append(f"Created: {output_images_folder}")
-            self.log_text.append(f"Created: {output_labels_folder}")
+
+            # Check if output folders already contain files
+            existing_images = [f for f in os.listdir(output_images_folder) if os.path.isfile(os.path.join(output_images_folder, f))]
+            existing_labels = [f for f in os.listdir(output_labels_folder) if os.path.isfile(os.path.join(output_labels_folder, f))]
+
+            if existing_images or existing_labels:
+                # Ask user what to do with existing files
+                msg_box = QMessageBox(self)
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setWindowTitle("Existing Files Found")
+                msg_box.setText(f"The output folders already contain files:\n"
+                               f"- {len(existing_images)} image(s)\n"
+                               f"- {len(existing_labels)} label(s)\n\n"
+                               f"Do you want to delete all existing files before sampling?")
+                msg_box.setInformativeText("Yes: Delete all existing files and start fresh\n"
+                                          "No: Keep existing files (may overwrite files with same names)\n"
+                                          "Cancel: Abort sampling operation")
+
+                yes_btn = msg_box.addButton("Yes", QMessageBox.YesRole)
+                no_btn = msg_box.addButton("No", QMessageBox.NoRole)
+                cancel_btn = msg_box.addButton("Cancel", QMessageBox.RejectRole)
+
+                msg_box.exec()
+                clicked_button = msg_box.clickedButton()
+
+                if clicked_button == cancel_btn:
+                    self.log_text.append("Sampling cancelled by user")
+                    return
+                elif clicked_button == yes_btn:
+                    # Delete all existing files
+                    self.log_text.append("Deleting existing files...")
+                    for img_file in existing_images:
+                        os.remove(os.path.join(output_images_folder, img_file))
+                    for lbl_file in existing_labels:
+                        os.remove(os.path.join(output_labels_folder, lbl_file))
+                    self.log_text.append(f"Deleted {len(existing_images)} image(s) and {len(existing_labels)} label(s)")
+                else:  # No button
+                    self.log_text.append("Keeping existing files (may overwrite files with same names)")
+
+            self.log_text.append(f"Output folder ready: {output_images_folder}")
+            self.log_text.append(f"Output folder ready: {output_labels_folder}")
 
             # Step 4: Copy sampled files to output folders
             self.log_text.append("Step 4: Copying files...")
