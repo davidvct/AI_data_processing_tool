@@ -7,12 +7,16 @@ GitHub: https://github.com/davidvct/AI_data_processing_tool
 """
 
 import sys
+import os
+import random
+import shutil
+from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget,
                               QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                               QLineEdit, QTextEdit, QGroupBox, QSpinBox,
                               QDoubleSpinBox, QComboBox, QCheckBox, QListWidget,
                               QTableWidget, QSplitter, QFileDialog, QSlider,
-                              QProgressBar, QRadioButton, QGridLayout)
+                              QProgressBar, QRadioButton, QGridLayout, QListWidgetItem)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
 
@@ -67,6 +71,7 @@ class SamplingTab(QWidget):
         button_layout = QHBoxLayout()
         self.start_btn = QPushButton("Start Sampling")
         self.start_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+        self.start_btn.clicked.connect(self.start_sampling)
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setEnabled(False)
         button_layout.addWidget(self.start_btn)
@@ -299,6 +304,7 @@ class SamplingTab(QWidget):
         if folder:
             self.vf_input_path.setText(folder)
             self.log_text.append(f"Input folder selected: {folder}")
+            self.scan_video_folders()
 
     def browse_output_folder(self):
         """Browse for output folder"""
@@ -333,6 +339,180 @@ class SamplingTab(QWidget):
         for i in range(self.vf_folders_list.count()):
             item = self.vf_folders_list.item(i)
             item.setCheckState(Qt.Unchecked)
+
+    def scan_video_folders(self):
+        """Scan input folder for video subfolders and populate the list"""
+        input_path = self.vf_input_path.text()
+        if not input_path or not os.path.exists(input_path):
+            self.log_text.append("Error: Invalid input folder path")
+            return
+
+        # Clear existing list
+        self.vf_folders_list.clear()
+
+        # Scan for subfolders
+        try:
+            subfolders = [f for f in os.listdir(input_path)
+                         if os.path.isdir(os.path.join(input_path, f))]
+
+            if not subfolders:
+                self.log_text.append("No subfolders found in the selected directory")
+                return
+
+            # Add each subfolder to the list with a checkbox
+            for folder_name in sorted(subfolders):
+                item = QListWidgetItem(folder_name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked)  # Default to checked
+                self.vf_folders_list.addItem(item)
+
+            self.log_text.append(f"Found {len(subfolders)} video folder(s)")
+
+        except Exception as e:
+            self.log_text.append(f"Error scanning folders: {str(e)}")
+
+    def start_sampling(self):
+        """Start the sampling process based on current mode"""
+        current_mode = self.mode_selector.currentIndex()
+
+        if current_mode == 0:  # Video Frame - Yolo
+            self.start_video_frame_sampling()
+        else:
+            self.log_text.append(f"Error: {self.mode_selector.currentText()} mode is not yet implemented")
+
+    def start_video_frame_sampling(self):
+        """Start sampling for Video Frame - Yolo mode"""
+        # Validate inputs
+        input_path = self.vf_input_path.text()
+        output_path = self.vf_output_path.text()
+
+        if not input_path:
+            self.log_text.append("Error: Please select an input folder")
+            return
+
+        if not output_path:
+            self.log_text.append("Error: Please select an output folder")
+            return
+
+        if not os.path.exists(input_path):
+            self.log_text.append("Error: Input folder does not exist")
+            return
+
+        # Get selected video folders
+        selected_folders = []
+        for i in range(self.vf_folders_list.count()):
+            item = self.vf_folders_list.item(i)
+            if item.checkState() == Qt.Checked:
+                selected_folders.append(item.text())
+
+        if not selected_folders:
+            self.log_text.append("Error: No video folders selected")
+            return
+
+        sample_size = self.vf_sample_size.value()
+        random_seed = self.vf_random_seed.value()
+
+        self.log_text.append("=" * 50)
+        self.log_text.append("Starting sampling process...")
+        self.log_text.append(f"Input folder: {input_path}")
+        self.log_text.append(f"Output folder: {output_path}")
+        self.log_text.append(f"Selected folders: {len(selected_folders)}")
+        self.log_text.append(f"Sample size: {sample_size}")
+        self.log_text.append(f"Random seed: {random_seed}")
+        self.log_text.append("=" * 50)
+
+        try:
+            # Step 1: Collect all image/label pairs from selected folders
+            self.log_text.append("Step 1: Collecting image/label pairs...")
+            image_label_pairs = []
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+
+            for folder_name in selected_folders:
+                video_folder_path = os.path.join(input_path, folder_name)
+                frames_folder = os.path.join(video_folder_path, 'frames')
+                labels_folder = os.path.join(video_folder_path, 'labels')
+
+                # Check if frames and labels folders exist
+                if not os.path.exists(frames_folder):
+                    self.log_text.append(f"Warning: 'frames' folder not found in {folder_name}, skipping...")
+                    continue
+
+                if not os.path.exists(labels_folder):
+                    self.log_text.append(f"Warning: 'labels' folder not found in {folder_name}, skipping...")
+                    continue
+
+                # Get all image files from frames folder
+                for image_file in os.listdir(frames_folder):
+                    if Path(image_file).suffix.lower() in image_extensions:
+                        # Get corresponding label file (same name but .txt extension)
+                        label_file = Path(image_file).stem + '.txt'
+                        image_path = os.path.join(frames_folder, image_file)
+                        label_path = os.path.join(labels_folder, label_file)
+
+                        # Only add if both image and label exist
+                        if os.path.exists(label_path):
+                            image_label_pairs.append({
+                                'image': image_path,
+                                'label': label_path,
+                                'folder': folder_name,
+                                'filename': image_file
+                            })
+
+            self.log_text.append(f"Found {len(image_label_pairs)} valid image/label pairs")
+
+            if len(image_label_pairs) == 0:
+                self.log_text.append("Error: No valid image/label pairs found")
+                return
+
+            # Step 2: Randomly sample specified number
+            self.log_text.append(f"Step 2: Randomly sampling {sample_size} pairs...")
+            random.seed(random_seed)
+
+            if sample_size > len(image_label_pairs):
+                self.log_text.append(f"Warning: Sample size ({sample_size}) is larger than available pairs ({len(image_label_pairs)})")
+                self.log_text.append("Using all available pairs instead")
+                sampled_pairs = image_label_pairs
+            else:
+                sampled_pairs = random.sample(image_label_pairs, sample_size)
+
+            self.log_text.append(f"Sampled {len(sampled_pairs)} pairs")
+
+            # Step 3: Create output folders
+            self.log_text.append("Step 3: Creating output folders...")
+            output_images_folder = os.path.join(output_path, 'images')
+            output_labels_folder = os.path.join(output_path, 'labels')
+
+            os.makedirs(output_images_folder, exist_ok=True)
+            os.makedirs(output_labels_folder, exist_ok=True)
+            self.log_text.append(f"Created: {output_images_folder}")
+            self.log_text.append(f"Created: {output_labels_folder}")
+
+            # Step 4: Copy sampled files to output folders
+            self.log_text.append("Step 4: Copying files...")
+            self.progress_bar.setMaximum(len(sampled_pairs))
+            self.progress_bar.setValue(0)
+
+            for idx, pair in enumerate(sampled_pairs):
+                # Copy image
+                dest_image = os.path.join(output_images_folder, pair['filename'])
+                shutil.copy2(pair['image'], dest_image)
+
+                # Copy label
+                label_filename = Path(pair['filename']).stem + '.txt'
+                dest_label = os.path.join(output_labels_folder, label_filename)
+                shutil.copy2(pair['label'], dest_label)
+
+                self.progress_bar.setValue(idx + 1)
+
+            self.log_text.append("=" * 50)
+            self.log_text.append("✓ Sampling completed successfully!")
+            self.log_text.append(f"✓ {len(sampled_pairs)} image/label pairs copied to output folder")
+            self.log_text.append("=" * 50)
+
+        except Exception as e:
+            self.log_text.append(f"Error during sampling: {str(e)}")
+            import traceback
+            self.log_text.append(traceback.format_exc())
 
 
 class AugmentationTab(QWidget):
