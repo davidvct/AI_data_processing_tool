@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget,
                               QTableWidget, QSplitter, QFileDialog, QSlider,
                               QProgressBar, QRadioButton, QGridLayout)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor
 
 
 class SamplingTab(QWidget):
@@ -25,65 +25,42 @@ class SamplingTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout()
 
-        # Input section
-        input_group = QGroupBox("Input")
-        input_layout = QVBoxLayout()
+        # Sampling Mode Selection at the top
+        mode_group = QGroupBox("Sampling Mode")
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("Select Mode:"))
+        self.mode_selector = QComboBox()
+        self.mode_selector.addItem("Video Frame - Yolo")
+        self.mode_selector.addItem("String folder")
+        self.mode_selector.addItem("Tile")
+        self.mode_selector.addItem("Standard")
 
-        # Dataset path
-        path_layout = QHBoxLayout()
-        path_layout.addWidget(QLabel("Dataset Path:"))
-        self.dataset_path = QLineEdit()
-        path_layout.addWidget(self.dataset_path)
-        self.browse_btn = QPushButton("Browse")
-        path_layout.addWidget(self.browse_btn)
-        input_layout.addLayout(path_layout)
+        # Style placeholder items in gray
+        for i in range(1, 4):  # Items 1, 2, 3 are placeholders
+            self.mode_selector.setItemData(i, QColor(150, 150, 150), Qt.ForegroundRole)
 
-        input_group.setLayout(input_layout)
-        layout.addWidget(input_group)
+        self.mode_selector.currentIndexChanged.connect(self.on_mode_changed)
+        mode_layout.addWidget(self.mode_selector)
+        mode_layout.addStretch()
+        mode_group.setLayout(mode_layout)
+        layout.addWidget(mode_group)
 
-        # Sampling Options
-        sampling_group = QGroupBox("Sampling Options")
-        sampling_layout = QGridLayout()
+        # Container for mode-specific UIs
+        self.mode_container = QWidget()
+        self.mode_layout = QVBoxLayout()
+        self.mode_container.setLayout(self.mode_layout)
+        layout.addWidget(self.mode_container)
 
-        # Sample size
-        sampling_layout.addWidget(QLabel("Sample Size:"), 0, 0)
-        self.sample_size = QSpinBox()
-        self.sample_size.setRange(1, 100000)
-        self.sample_size.setValue(100)
-        sampling_layout.addWidget(self.sample_size, 0, 1)
+        # Create all mode UIs
+        self.create_video_frame_yolo_ui()
+        self.create_placeholder_ui("String folder")
+        self.create_placeholder_ui("Tile")
+        self.create_placeholder_ui("Standard")
 
-        # Sampling method
-        sampling_layout.addWidget(QLabel("Sampling Method:"), 1, 0)
-        self.sampling_method = QComboBox()
-        self.sampling_method.addItems(["Random", "Stratified", "Systematic", "Cluster"])
-        sampling_layout.addWidget(self.sampling_method, 1, 1)
+        # Show default mode
+        self.on_mode_changed(0)
 
-        # Random seed
-        sampling_layout.addWidget(QLabel("Random Seed:"), 2, 0)
-        self.random_seed = QSpinBox()
-        self.random_seed.setRange(0, 999999)
-        self.random_seed.setValue(42)
-        sampling_layout.addWidget(self.random_seed, 2, 1)
-
-        sampling_group.setLayout(sampling_layout)
-        layout.addWidget(sampling_group)
-
-        # Output section
-        output_group = QGroupBox("Output")
-        output_layout = QVBoxLayout()
-
-        output_path_layout = QHBoxLayout()
-        output_path_layout.addWidget(QLabel("Output Path:"))
-        self.output_path = QLineEdit()
-        output_path_layout.addWidget(self.output_path)
-        self.output_browse_btn = QPushButton("Browse")
-        output_path_layout.addWidget(self.output_browse_btn)
-        output_layout.addLayout(output_path_layout)
-
-        output_group.setLayout(output_layout)
-        layout.addWidget(output_group)
-
-        # Progress and buttons
+        # Progress and buttons (common for all modes)
         self.progress_bar = QProgressBar()
         layout.addWidget(self.progress_bar)
 
@@ -96,7 +73,7 @@ class SamplingTab(QWidget):
         button_layout.addWidget(self.stop_btn)
         layout.addLayout(button_layout)
 
-        # Log area
+        # Log area (common for all modes)
         log_group = QGroupBox("Log")
         log_layout = QVBoxLayout()
         self.log_text = QTextEdit()
@@ -108,6 +85,254 @@ class SamplingTab(QWidget):
 
         layout.addStretch()
         self.setLayout(layout)
+
+    def create_video_frame_yolo_ui(self):
+        """Create UI for Video Frame - Yolo mode"""
+        self.video_frame_widget = QWidget()
+        main_layout = QVBoxLayout()
+
+        # Input folder path
+        input_group = QGroupBox("Input Folder")
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(QLabel("Folder Path:"))
+        self.vf_input_path = QLineEdit()
+        self.vf_input_path.setPlaceholderText("Select folder containing video subfolders...")
+        input_layout.addWidget(self.vf_input_path)
+        self.vf_browse_btn = QPushButton("Browse")
+        self.vf_browse_btn.clicked.connect(self.browse_input_folder)
+        input_layout.addWidget(self.vf_browse_btn)
+        self.vf_analyze_btn = QPushButton("Analyze")
+        self.vf_analyze_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; }")
+        self.vf_analyze_btn.clicked.connect(self.analyze_dataset)
+        input_layout.addWidget(self.vf_analyze_btn)
+        input_group.setLayout(input_layout)
+        main_layout.addWidget(input_group)
+
+        # Create horizontal splitter for left panel (video folders) and right panel (controls)
+        splitter = QSplitter(Qt.Horizontal)
+
+        # Left Panel - Video Folders List
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
+
+        folders_label = QLabel("Video Folders")
+        folders_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        left_layout.addWidget(folders_label)
+
+        # Toolbar for folder list
+        folder_toolbar = QHBoxLayout()
+        self.vf_select_all_btn = QPushButton("Select All")
+        self.vf_select_all_btn.clicked.connect(self.select_all_folders)
+        self.vf_deselect_all_btn = QPushButton("Deselect All")
+        self.vf_deselect_all_btn.clicked.connect(self.deselect_all_folders)
+        folder_toolbar.addWidget(self.vf_select_all_btn)
+        folder_toolbar.addWidget(self.vf_deselect_all_btn)
+        folder_toolbar.addStretch()
+        left_layout.addLayout(folder_toolbar)
+
+        # Video folders list with checkboxes
+        self.vf_folders_list = QListWidget()
+        self.vf_folders_list.setMinimumWidth(250)
+        left_layout.addWidget(self.vf_folders_list)
+
+        left_panel.setLayout(left_layout)
+
+        # Right Panel - Controls and Statistics
+        right_panel = QWidget()
+        right_layout = QVBoxLayout()
+
+        # Statistics Section
+        stats_group = QGroupBox("Dataset Statistics")
+        stats_layout = QGridLayout()
+
+        # Create labels for statistics
+        stats_layout.addWidget(QLabel("Total Images:"), 0, 0)
+        self.vf_total_images_label = QLabel("N/A")
+        stats_layout.addWidget(self.vf_total_images_label, 0, 1)
+
+        stats_layout.addWidget(QLabel("Total Labels:"), 1, 0)
+        self.vf_total_labels_label = QLabel("N/A")
+        stats_layout.addWidget(self.vf_total_labels_label, 1, 1)
+
+        stats_layout.addWidget(QLabel("Video Folders:"), 2, 0)
+        self.vf_video_folders_label = QLabel("N/A")
+        stats_layout.addWidget(self.vf_video_folders_label, 2, 1)
+
+        stats_layout.addWidget(QLabel("Images per Folder:"), 3, 0)
+        self.vf_images_per_folder_label = QLabel("N/A")
+        stats_layout.addWidget(self.vf_images_per_folder_label, 3, 1)
+
+        stats_layout.addWidget(QLabel("Image Resolutions:"), 4, 0)
+        self.vf_resolutions_label = QLabel("N/A")
+        self.vf_resolutions_label.setWordWrap(True)
+        stats_layout.addWidget(self.vf_resolutions_label, 4, 1)
+
+        stats_layout.addWidget(QLabel("Image File Size:"), 5, 0)
+        self.vf_file_size_label = QLabel("N/A")
+        stats_layout.addWidget(self.vf_file_size_label, 5, 1)
+
+        stats_layout.addWidget(QLabel("Annotations per File:"), 6, 0)
+        self.vf_annotations_label = QLabel("N/A")
+        stats_layout.addWidget(self.vf_annotations_label, 6, 1)
+
+        stats_layout.addWidget(QLabel("Classes Found:"), 7, 0)
+        self.vf_classes_label = QLabel("N/A")
+        stats_layout.addWidget(self.vf_classes_label, 7, 1)
+
+        stats_group.setLayout(stats_layout)
+        right_layout.addWidget(stats_group)
+
+        # Sampling Options
+        sampling_group = QGroupBox("Sampling Options")
+        sampling_layout = QGridLayout()
+
+        # Sample size
+        sampling_layout.addWidget(QLabel("Sample Size:"), 0, 0)
+        self.vf_sample_size = QSpinBox()
+        self.vf_sample_size.setRange(1, 100000)
+        self.vf_sample_size.setValue(50)
+        sampling_layout.addWidget(self.vf_sample_size, 0, 1)
+
+        # Random seed
+        sampling_layout.addWidget(QLabel("Random Seed:"), 1, 0)
+        self.vf_random_seed = QSpinBox()
+        self.vf_random_seed.setRange(0, 999999)
+        self.vf_random_seed.setValue(42)
+        sampling_layout.addWidget(self.vf_random_seed, 1, 1)
+
+        sampling_group.setLayout(sampling_layout)
+        right_layout.addWidget(sampling_group)
+
+        # Output section
+        output_group = QGroupBox("Output Folder")
+        output_layout = QVBoxLayout()
+
+        output_path_layout = QHBoxLayout()
+        output_path_layout.addWidget(QLabel("Output Path:"))
+        self.vf_output_path = QLineEdit()
+        self.vf_output_path.setPlaceholderText("Will create 'images' and 'labels' folders here...")
+        output_path_layout.addWidget(self.vf_output_path)
+        self.vf_output_browse_btn = QPushButton("Browse")
+        self.vf_output_browse_btn.clicked.connect(self.browse_output_folder)
+        output_path_layout.addWidget(self.vf_output_browse_btn)
+        output_layout.addLayout(output_path_layout)
+
+        output_group.setLayout(output_layout)
+        right_layout.addWidget(output_group)
+
+        right_layout.addStretch()
+        right_panel.setLayout(right_layout)
+
+        # Add panels to splitter
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 1)  # Left panel
+        splitter.setStretchFactor(1, 2)  # Right panel gets more space
+
+        main_layout.addWidget(splitter)
+        self.video_frame_widget.setLayout(main_layout)
+
+    def create_placeholder_ui(self, mode_name):
+        """Create placeholder UI for modes not yet implemented"""
+        placeholder_widget = QWidget()
+        placeholder_layout = QVBoxLayout()
+
+        # Add spacer to center the message
+        placeholder_layout.addStretch()
+
+        # Placeholder message
+        placeholder_label = QLabel(f"{mode_name} mode")
+        placeholder_label.setAlignment(Qt.AlignCenter)
+        placeholder_font = QFont()
+        placeholder_font.setPointSize(14)
+        placeholder_font.setBold(True)
+        placeholder_label.setFont(placeholder_font)
+        placeholder_label.setStyleSheet("color: #999999;")
+        placeholder_layout.addWidget(placeholder_label)
+
+        coming_soon_label = QLabel("Coming Soon")
+        coming_soon_label.setAlignment(Qt.AlignCenter)
+        coming_soon_font = QFont()
+        coming_soon_font.setPointSize(12)
+        coming_soon_label.setFont(coming_soon_font)
+        coming_soon_label.setStyleSheet("color: #bbbbbb;")
+        placeholder_layout.addWidget(coming_soon_label)
+
+        placeholder_layout.addStretch()
+
+        placeholder_widget.setLayout(placeholder_layout)
+
+        # Store widget reference with mode name
+        if mode_name == "String folder":
+            self.string_folder_widget = placeholder_widget
+        elif mode_name == "Tile":
+            self.tile_widget = placeholder_widget
+        elif mode_name == "Standard":
+            self.standard_widget = placeholder_widget
+
+    def on_mode_changed(self, index):
+        """Handle mode selection change"""
+        # Clear current layout
+        while self.mode_layout.count():
+            child = self.mode_layout.takeAt(0)
+            if child.widget():
+                child.widget().setParent(None)
+
+        # Show selected mode UI
+        if index == 0:  # Video Frame - Yolo
+            self.mode_layout.addWidget(self.video_frame_widget)
+        elif index == 1:  # String folder
+            self.mode_layout.addWidget(self.string_folder_widget)
+        elif index == 2:  # Tile
+            self.mode_layout.addWidget(self.tile_widget)
+        elif index == 3:  # Standard
+            self.mode_layout.addWidget(self.standard_widget)
+
+    # Video Frame - Yolo mode handlers
+    def browse_input_folder(self):
+        """Browse for input folder containing video subfolders"""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Input Folder",
+            self.vf_input_path.text() if self.vf_input_path.text() else ""
+        )
+        if folder:
+            self.vf_input_path.setText(folder)
+            self.log_text.append(f"Input folder selected: {folder}")
+
+    def browse_output_folder(self):
+        """Browse for output folder"""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Folder",
+            self.vf_output_path.text() if self.vf_output_path.text() else ""
+        )
+        if folder:
+            self.vf_output_path.setText(folder)
+            self.log_text.append(f"Output folder selected: {folder}")
+
+    def analyze_dataset(self):
+        """Analyze the dataset and display statistics"""
+        input_path = self.vf_input_path.text()
+        if not input_path:
+            self.log_text.append("Error: Please select an input folder first")
+            return
+
+        self.log_text.append(f"Analyzing dataset at: {input_path}")
+        # TODO: Implement dataset analysis
+        self.log_text.append("Analysis complete (not yet implemented)")
+
+    def select_all_folders(self):
+        """Select all video folders"""
+        for i in range(self.vf_folders_list.count()):
+            item = self.vf_folders_list.item(i)
+            item.setCheckState(Qt.Checked)
+
+    def deselect_all_folders(self):
+        """Deselect all video folders"""
+        for i in range(self.vf_folders_list.count()):
+            item = self.vf_folders_list.item(i)
+            item.setCheckState(Qt.Unchecked)
 
 
 class AugmentationTab(QWidget):
