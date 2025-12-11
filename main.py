@@ -436,6 +436,8 @@ class SamplingTab(QWidget):
         try:
             # Step 1: Collect all image/label pairs from selected folders
             self.log_text.append("Step 1: Collecting image/label pairs...")
+            QApplication.processEvents()  # Update UI immediately
+
             image_label_pairs = []
             image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
 
@@ -453,16 +455,19 @@ class SamplingTab(QWidget):
                     self.log_text.append(f"Warning: 'labels' folder not found in {folder_name}, skipping...")
                     continue
 
+                # Get all label files once (much faster than checking existence for each image)
+                label_files = {Path(f).stem for f in os.listdir(labels_folder) if f.endswith('.txt')}
+
                 # Get all image files from frames folder
                 for image_file in os.listdir(frames_folder):
                     if Path(image_file).suffix.lower() in image_extensions:
-                        # Get corresponding label file (same name but .txt extension)
-                        label_file = Path(image_file).stem + '.txt'
-                        image_path = os.path.join(frames_folder, image_file)
-                        label_path = os.path.join(labels_folder, label_file)
+                        image_stem = Path(image_file).stem
 
-                        # Only add if both image and label exist
-                        if os.path.exists(label_path):
+                        # Check if corresponding label exists in the set (O(1) lookup)
+                        if image_stem in label_files:
+                            image_path = os.path.join(frames_folder, image_file)
+                            label_path = os.path.join(labels_folder, image_stem + '.txt')
+
                             image_label_pairs.append({
                                 'image': image_path,
                                 'label': label_path,
@@ -471,6 +476,7 @@ class SamplingTab(QWidget):
                             })
 
             self.log_text.append(f"Found {len(image_label_pairs)} valid image/label pairs")
+            QApplication.processEvents()  # Update UI after collection
 
             if len(image_label_pairs) == 0:
                 self.log_text.append("Error: No valid image/label pairs found")
