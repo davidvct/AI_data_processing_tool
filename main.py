@@ -373,12 +373,24 @@ class SamplingTab(QWidget):
 
     def start_sampling(self):
         """Start the sampling process based on current mode"""
+        # Change button state immediately
+        self.start_btn.setEnabled(False)
+        self.start_btn.setText("Sampling in progress...")
+        self.start_btn.setStyleSheet("QPushButton { background-color: #FFC107; color: white; }")
+        self.stop_btn.setEnabled(True)
+
+        # Process events to update UI immediately
+        QApplication.processEvents()
+
         current_mode = self.mode_selector.currentIndex()
 
         if current_mode == 0:  # Video Frame - Yolo
             self.start_video_frame_sampling()
         else:
             self.log_text.append(f"Error: {self.mode_selector.currentText()} mode is not yet implemented")
+
+        # Reset button state after completion
+        self.reset_sampling_button()
 
     def start_video_frame_sampling(self):
         """Start sampling for Video Frame - Yolo mode"""
@@ -504,6 +516,10 @@ class SamplingTab(QWidget):
 
                 self.progress_bar.setValue(idx + 1)
 
+                # Update UI every 10 files to show progress
+                if (idx + 1) % 10 == 0:
+                    QApplication.processEvents()
+
             self.log_text.append("=" * 50)
             self.log_text.append("✓ Sampling completed successfully!")
             self.log_text.append(f"✓ {len(sampled_pairs)} image/label pairs copied to output folder")
@@ -513,6 +529,13 @@ class SamplingTab(QWidget):
             self.log_text.append(f"Error during sampling: {str(e)}")
             import traceback
             self.log_text.append(traceback.format_exc())
+
+    def reset_sampling_button(self):
+        """Reset the sampling button to its original state"""
+        self.start_btn.setEnabled(True)
+        self.start_btn.setText("Start Sampling")
+        self.start_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+        self.stop_btn.setEnabled(False)
 
 
 class AugmentationTab(QWidget):
