@@ -26,3 +26,8 @@ Thumbs.db
 *.log
 output/
 temp/
+
+# Documentation and test files (generated during refactoring)
+DEVELOPMENT_GUIDE.md
+REFACTORING_SUMMARY.md
+test_imports.py
