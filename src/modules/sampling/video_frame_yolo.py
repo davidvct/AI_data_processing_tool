@@ -12,7 +12,7 @@ from PIL import Image
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                               QLineEdit, QGroupBox, QSpinBox, QListWidget, QSplitter,
                               QGridLayout, QListWidgetItem, QMessageBox, QFileDialog,
-                              QApplication)
+                              QApplication, QProgressBar)
 from PySide6.QtCore import Qt
 
 from src.utils.file_utils import format_file_size
@@ -33,18 +33,29 @@ class VideoFrameYoloWidget(QWidget):
 
         # Input folder path
         input_group = QGroupBox("Input Folder")
-        input_layout = QHBoxLayout()
-        input_layout.addWidget(QLabel("Folder Path:"))
+        input_layout = QVBoxLayout()
+
+        # First row: path and buttons
+        path_layout = QHBoxLayout()
+        path_layout.addWidget(QLabel("Folder Path:"))
         self.input_path = QLineEdit()
         self.input_path.setPlaceholderText("Select folder containing video subfolders...")
-        input_layout.addWidget(self.input_path)
+        path_layout.addWidget(self.input_path)
         self.browse_btn = QPushButton("Browse")
         self.browse_btn.clicked.connect(self.browse_input_folder)
-        input_layout.addWidget(self.browse_btn)
+        path_layout.addWidget(self.browse_btn)
         self.analyze_btn = QPushButton("Analyze")
         self.analyze_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; }")
         self.analyze_btn.clicked.connect(self.analyze_dataset)
-        input_layout.addWidget(self.analyze_btn)
+        path_layout.addWidget(self.analyze_btn)
+        input_layout.addLayout(path_layout)
+
+        # Second row: progress bar for analysis
+        self.analysis_progress = QProgressBar()
+        self.analysis_progress.setVisible(False)
+        self.analysis_progress.setTextVisible(True)
+        input_layout.addWidget(self.analysis_progress)
+
         input_group.setLayout(input_layout)
         main_layout.addWidget(input_group)
 
@@ -206,18 +217,33 @@ class VideoFrameYoloWidget(QWidget):
             self.log_text.append("Error: Input folder does not exist")
             return
 
+        # Change button appearance to yellow "Thinking" state
+        self.analyze_btn.setText("Thinking")
+        self.analyze_btn.setStyleSheet("QPushButton { background-color: #FFC107; color: white; }")
+        self.analyze_btn.setEnabled(False)
+
+        # Show and initialize progress bar
+        self.analysis_progress.setVisible(True)
+        self.analysis_progress.setValue(0)
+
         self.log_text.append("=" * 50)
         self.log_text.append(f"Analyzing dataset at: {input_path}")
         QApplication.processEvents()
 
         try:
-            # Get all video folders
-            video_folders = [f for f in os.listdir(input_path)
-                           if os.path.isdir(os.path.join(input_path, f))]
+            # Get selected video folders from the list
+            selected_folders = []
+            for i in range(self.folders_list.count()):
+                item = self.folders_list.item(i)
+                if item.checkState() == Qt.Checked:
+                    selected_folders.append(item.text())
 
-            if not video_folders:
-                self.log_text.append("Error: No subfolders found")
+            if not selected_folders:
+                self.log_text.append("Error: No video folders selected")
                 return
+
+            # Set progress bar maximum
+            self.analysis_progress.setMaximum(len(selected_folders))
 
             # Initialize statistics
             total_images = 0
@@ -229,48 +255,65 @@ class VideoFrameYoloWidget(QWidget):
             all_classes = set()
             image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
 
-            # Analyze each video folder
-            for folder_name in video_folders:
+            # Analyze each selected video folder
+            for folder_idx, folder_name in enumerate(selected_folders):
                 video_folder_path = os.path.join(input_path, folder_name)
                 frames_folder = os.path.join(video_folder_path, 'frames')
                 labels_folder = os.path.join(video_folder_path, 'labels')
+
+                # Update progress
+                self.analysis_progress.setValue(folder_idx + 1)
+                self.analysis_progress.setFormat(f"Analyzing folder {folder_idx + 1}/{len(selected_folders)}: {folder_name}")
+                QApplication.processEvents()
 
                 # Check if folders exist
                 if not os.path.exists(frames_folder) or not os.path.exists(labels_folder):
                     continue
 
-                # Count images in this folder
-                folder_images = 0
+                # OPTIMIZATION: Get all files at once
+                try:
+                    frame_files = os.listdir(frames_folder)
+                except Exception:
+                    continue
 
-                # Analyze frames folder
-                for image_file in os.listdir(frames_folder):
-                    if Path(image_file).suffix.lower() in image_extensions:
-                        folder_images += 1
-                        total_images += 1
-                        image_path = os.path.join(frames_folder, image_file)
+                # Filter image files
+                image_files = [f for f in frame_files if Path(f).suffix.lower() in image_extensions]
+                folder_images = len(image_files)
+                total_images += folder_images
+                folder_image_counts.append(folder_images)
 
-                        # Get file size
+                # Process ALL image files - get file sizes and resolutions
+                for idx, image_file in enumerate(image_files):
+                    image_path = os.path.join(frames_folder, image_file)
+
+                    try:
+                        # Get file size (very fast - just reads filesystem metadata)
                         file_size = os.path.getsize(image_path)
                         file_sizes.append(file_size)
 
-                        # Get image resolution (only sample some to save time)
-                        if total_images % 10 == 0 or total_images <= 10:
-                            try:
-                                with Image.open(image_path) as img:
-                                    resolution = f"{img.width}x{img.height}"
-                                    resolutions[resolution] = resolutions.get(resolution, 0) + 1
-                            except Exception:
-                                pass  # Skip if image can't be opened
+                        # Get image resolution using PIL (only reads header, not full image - ~2-3ms per image)
+                        with Image.open(image_path) as img:
+                            resolution = f"{img.width}x{img.height}"
+                            resolutions[resolution] = resolutions.get(resolution, 0) + 1
+                    except Exception:
+                        pass  # Skip files that can't be read
 
-                folder_image_counts.append(folder_images)
+                    # Update progress every 50 images to keep UI responsive
+                    if (idx + 1) % 50 == 0:
+                        self.analysis_progress.setFormat(
+                            f"Analyzing folder {folder_idx + 1}/{len(selected_folders)}: {folder_name} "
+                            f"({idx + 1}/{len(image_files)} images)"
+                        )
+                        QApplication.processEvents()
 
-                # Analyze labels folder
-                for label_file in os.listdir(labels_folder):
-                    if label_file.endswith('.txt'):
-                        total_labels += 1
+                # Analyze ALL label files (text files are fast to read)
+                try:
+                    label_files = [f for f in os.listdir(labels_folder) if f.endswith('.txt')]
+                    total_labels += len(label_files)
+
+                    # Read ALL label files - they're tiny text files
+                    for label_file in label_files:
                         label_path = os.path.join(labels_folder, label_file)
-
-                        # Count annotations and classes in this label file
                         try:
                             with open(label_path, 'r') as f:
                                 lines = f.readlines()
@@ -280,9 +323,14 @@ class VideoFrameYoloWidget(QWidget):
                                 for line in lines:
                                     parts = line.strip().split()
                                     if parts:
-                                        all_classes.add(int(parts[0]))
+                                        try:
+                                            all_classes.add(int(parts[0]))
+                                        except ValueError:
+                                            pass
                         except Exception:
-                            pass  # Skip if file can't be read
+                            pass
+                except Exception:
+                    pass
 
             # Calculate statistics
             num_folders = len([c for c in folder_image_counts if c > 0])
@@ -325,7 +373,7 @@ class VideoFrameYoloWidget(QWidget):
             self.log_text.append(f"✓ Analysis complete!")
             self.log_text.append(f"  Total images: {total_images}")
             self.log_text.append(f"  Total labels: {total_labels}")
-            self.log_text.append(f"  Video folders: {num_folders}")
+            self.log_text.append(f"  Video folders analyzed: {num_folders}")
             self.log_text.append(f"  Classes found: {num_classes}")
             self.log_text.append("=" * 50)
 
@@ -333,6 +381,14 @@ class VideoFrameYoloWidget(QWidget):
             self.log_text.append(f"Error during analysis: {str(e)}")
             import traceback
             self.log_text.append(traceback.format_exc())
+        finally:
+            # Restore button to original state
+            self.analyze_btn.setText("Analyze")
+            self.analyze_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; }")
+            self.analyze_btn.setEnabled(True)
+
+            # Hide progress bar
+            self.analysis_progress.setVisible(False)
 
     def select_all_folders(self):
         """Select all video folders"""

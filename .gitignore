@@ -26,6 +26,7 @@ Thumbs.db
 *.log
 output/
 temp/
+test_sampling/
 
 # Documentation and test files (generated during refactoring)
 DEVELOPMENT_GUIDE.md
